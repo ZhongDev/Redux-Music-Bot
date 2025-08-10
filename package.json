@@ -1,0 +1,23 @@
+{
+  "name": "redux-music-bot",
+  "version": "1.0.0",
+  "description": "Discord music bot that queues YouTube links and plays in voice channels.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy:commands": "node src/deploy-commands.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@discordjs/voice": "^0.18.0",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "ffmpeg-static": "^5.2.0",
+    "opusscript": "^0.0.8",
+    "@distube/ytdl-core": "^4.16.12"
+  }
+}
