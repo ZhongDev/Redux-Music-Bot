@@ -6,6 +6,8 @@ Discord Music Bot
 
 Discord music bot that can be added to a server, listens for commands to add a YouTube video link to a queue, joins the message sender's voice call, plays through the queue, and disconnects when done.
 
+License: GNU GPL v3 (see `LICENSE`).
+
 ### Features
 
 - Slash commands: `/play <url>`, `/skip`, `/queue`, `/stop`
