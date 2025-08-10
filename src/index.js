@@ -1,11 +1,11 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits, Events } from 'discord.js';
+import { Client, GatewayIntentBits, Events, MessageFlags } from 'discord.js';
 import { joinVoiceChannel, createAudioPlayer, NoSubscriberBehavior, AudioPlayerStatus, createAudioResource, entersState, VoiceConnectionStatus, demuxProbe } from '@discordjs/voice';
 import ytdl from '@distube/ytdl-core';
 
 const ytdlRequestOptions = process.env.YOUTUBE_COOKIE
-  ? { requestOptions: { headers: { cookie: process.env.YOUTUBE_COOKIE } } }
-  : {};
+    ? { requestOptions: { headers: { cookie: process.env.YOUTUBE_COOKIE } } }
+    : {};
 
 // Simple in-memory per-guild queue
 const queues = new Map(); // guildId -> { connection, player, songs: [{ url, title, requestedBy }], textChannelId, voiceChannelId, playing }
@@ -44,22 +44,22 @@ async function playNext(guild, client) {
         return;
     }
 
-  if (!next.url) {
+    if (!next.url) {
         console.warn('Queue item without URL, skipping:', next);
         return playNext(guild, client);
     }
 
     try {
-    const ytReadable = ytdl(next.url, {
-      filter: 'audioonly',
-      quality: 'highestaudio',
-      highWaterMark: 1 << 25,
-      ...ytdlRequestOptions,
-    });
-    const { stream, type } = await demuxProbe(ytReadable);
-    const resource = createAudioResource(stream, { inputType: type });
-    queue.player.play(resource);
-    queue.playing = true;
+        const ytReadable = ytdl(next.url, {
+            filter: 'audioonly',
+            quality: 'highestaudio',
+            highWaterMark: 1 << 25,
+            ...ytdlRequestOptions,
+        });
+        const { stream, type } = await demuxProbe(ytReadable);
+        const resource = createAudioResource(stream, { inputType: type });
+        queue.player.play(resource);
+        queue.playing = true;
     } catch (err) {
         console.error('Failed to play:', err);
         return playNext(guild, client);
@@ -128,23 +128,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     const { commandName } = interaction;
     if (commandName === 'play') {
-    let url = interaction.options.getString('url', true);
-    if (!ytdl.validateURL(url)) {
-      await interaction.reply({ content: 'Please provide a valid YouTube video URL.', ephemeral: true });
-      return;
-    }
+        let url = interaction.options.getString('url', true);
+        if (!ytdl.validateURL(url)) {
+            await interaction.reply({ content: 'Please provide a valid YouTube video URL.', flags: MessageFlags.Ephemeral });
+            return;
+        }
         await interaction.deferReply();
         const queue = getOrCreateQueue(interaction.guild.id);
         registerPlayerEvents(interaction.guild.id);
-    let info = null;
-    let title = 'Unknown title';
-    try {
-      info = await ytdl.getBasicInfo(url, ytdlRequestOptions);
-      title = info?.videoDetails?.title ?? title;
-    } catch (e) {
-      await interaction.editReply('Failed to fetch video info. Please try a different link.');
-      return;
-    }
+        let info = null;
+        let title = 'Unknown title';
+        try {
+            info = await ytdl.getBasicInfo(url, ytdlRequestOptions);
+            title = info?.videoDetails?.title ?? title;
+        } catch (e) {
+            await interaction.editReply('Failed to fetch video info. Please try a different link.');
+            return;
+        }
 
         queue.songs.push({ url, title, requestedBy: interaction.user.id });
         queue.textChannelId = interaction.channel.id;
@@ -162,7 +162,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             await interaction.editReply(`Queued: ${title}`);
         }
     } else if (commandName === 'skip') {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const queue = queues.get(interaction.guild.id);
         if (!queue || !queue.playing) {
             await interaction.editReply('Nothing is playing.');
@@ -171,7 +171,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         queue.player.stop(true);
         await interaction.editReply('Skipped.');
     } else if (commandName === 'queue') {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const queue = queues.get(interaction.guild.id);
         if (!queue || (queue.songs.length === 0 && !queue.playing)) {
             await interaction.editReply('Queue is empty.');
@@ -181,7 +181,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const list = queue.songs.slice(0, 10).map((s, i) => `${i + 1}. ${s.title}`).join('\n');
         await interaction.editReply(`${now}. Upcoming:\n${list || 'No upcoming songs.'}`);
     } else if (commandName === 'stop') {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const queue = queues.get(interaction.guild.id);
         if (!queue) {
             await interaction.editReply('Not connected.');
