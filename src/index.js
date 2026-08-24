@@ -1,11 +1,28 @@
 import 'dotenv/config';
 import { Client, GatewayIntentBits, Events, MessageFlags } from 'discord.js';
 import { joinVoiceChannel, createAudioPlayer, NoSubscriberBehavior, AudioPlayerStatus, createAudioResource, entersState, VoiceConnectionStatus, demuxProbe } from '@discordjs/voice';
-import ytdl from '@distube/ytdl-core';
+import { Innertube } from 'youtubei.js';
 
-const ytdlRequestOptions = process.env.YOUTUBE_COOKIE
-    ? { requestOptions: { headers: { cookie: process.env.YOUTUBE_COOKIE } } }
-    : {};
+// Initialize YouTube client; optionally attach cookie for restricted content
+const yt = await Innertube.create({
+    fetch: (input, init) => {
+        init = init ?? {};
+        const headers = typeof init.headers === 'object' && !(init.headers instanceof Headers)
+            ? { ...init.headers }
+            : {};
+        if (process.env.YOUTUBE_COOKIE) headers.cookie = process.env.YOUTUBE_COOKIE;
+        return fetch(input, { ...init, headers });
+    },
+});
+
+function isValidYouTubeUrl(url) {
+    try {
+        const u = new URL(url);
+        return /(youtube\.com|youtu\.be)$/i.test(u.hostname);
+    } catch {
+        return false;
+    }
+}
 
 // Simple in-memory per-guild queue
 const queues = new Map(); // guildId -> { connection, player, songs: [{ url, title, requestedBy }], textChannelId, voiceChannelId, playing }
@@ -50,12 +67,8 @@ async function playNext(guild, client) {
     }
 
     try {
-        const ytReadable = ytdl(next.url, {
-            filter: 'audioonly',
-            quality: 'highestaudio',
-            highWaterMark: 1 << 25,
-            ...ytdlRequestOptions,
-        });
+        const info = await yt.getInfo(next.url);
+        const ytReadable = await info.download({ type: 'audio', quality: 'best' });
         const { stream, type } = await demuxProbe(ytReadable);
         const resource = createAudioResource(stream, { inputType: type });
         queue.player.play(resource);
@@ -129,7 +142,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const { commandName } = interaction;
     if (commandName === 'play') {
         let url = interaction.options.getString('url', true);
-        if (!ytdl.validateURL(url)) {
+        if (!isValidYouTubeUrl(url)) {
             await interaction.reply({ content: 'Please provide a valid YouTube video URL.', flags: MessageFlags.Ephemeral });
             return;
         }
@@ -139,8 +152,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         let info = null;
         let title = 'Unknown title';
         try {
-            info = await ytdl.getBasicInfo(url, ytdlRequestOptions);
-            title = info?.videoDetails?.title ?? title;
+            info = await yt.getInfo(url);
+            title = info?.basic_info?.title ?? title;
         } catch (e) {
             await interaction.editReply('Failed to fetch video info. Please try a different link.');
             return;

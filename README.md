@@ -55,4 +55,4 @@ npm start
 
 ### Notes
 
-- Streams audio via `ytdl-core` and `@discordjs/voice`. Includes `ffmpeg-static` and `opusscript` for broad compatibility.
+- Streams audio via `youtubei.js` (YouTube.js) and `@discordjs/voice`. Includes `ffmpeg-static` and `opusscript` for broad compatibility.
