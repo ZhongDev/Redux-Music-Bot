@@ -79,6 +79,80 @@ Other behaviour:
 
    `npm run deploy:commands -- --global` registers commands globally regardless of `DISCORD_GUILD_ID`; `-- --clear` removes them.
 
+## Running with Docker
+
+The repo ships a `Dockerfile` and `compose.yaml` for running the bot as a single container (e.g. on a homelab Docker host). Nothing needs to be installed on the host besides Docker: ffmpeg and the Opus/DAVE libraries are bundled into the image at build time.
+
+1. Copy the repository to the host and create your `.env` from `.env.example` (only `DISCORD_TOKEN` and `DISCORD_CLIENT_ID` are required).
+2. Build and register the slash commands (one-off):
+
+   ```sh
+   docker compose build
+   docker compose run --rm redux-music-bot node src/deploy-commands.js
+   ```
+
+3. Start it:
+
+   ```sh
+   docker compose up -d
+   docker compose logs -f     # prints the invite link on startup
+   ```
+
+Notes:
+
+- Configuration is read from `.env` via `env_file`; edit it and `docker compose up -d` again to apply changes.
+- The youtubei.js session cache is kept in a named volume (`youtubei-cache`) so restarts are fast.
+- `init: true` runs the process under tini so ffmpeg child processes are reaped and shutdown is clean.
+- The image works on x64 and arm64 hosts (e.g. a Raspberry Pi 4/5); build it on the target architecture, since `ffmpeg-static` downloads the matching binary during `npm ci`.
+- To update: `git pull && docker compose build && docker compose up -d`. Re-run the deploy command whenever slash commands change.
+
+### Prebuilt image (GHCR)
+
+Every push to `main` (and `rewrite/v2`) runs the tests and publishes a multi-arch image to GitHub Container Registry via `.github/workflows/docker.yml`:
+
+```
+ghcr.io/zhongdev/redux-music-bot:latest      # main
+ghcr.io/zhongdev/redux-music-bot:rewrite-v2  # rewrite/v2 branch
+ghcr.io/zhongdev/redux-music-bot:2.0.0       # git tag v2.0.0
+```
+
+`compose.yaml` already points at `:latest`, so `docker compose pull && docker compose up -d` updates without building. The first publish creates the package as **private**: open the package on GitHub (Profile → Packages → redux-music-bot → Package settings) and set it to **Public**, or run `docker login ghcr.io` on the host with a personal access token that has `read:packages`.
+
+### Dockge
+
+Dockge manages compose stacks, so use the prebuilt image (no build step on the host):
+
+1. In Dockge click **+ Compose**, name the stack `redux-music-bot`, and paste:
+
+   ```yaml
+   services:
+     redux-music-bot:
+       image: ghcr.io/zhongdev/redux-music-bot:latest
+       container_name: redux-music-bot
+       restart: unless-stopped
+       init: true
+       env_file: .env
+       environment:
+         YOUTUBE_CACHE_DIR: /app/.cache/youtubei
+       volumes:
+         - youtubei-cache:/app/.cache
+
+   volumes:
+     youtubei-cache:
+   ```
+
+2. In the **.env** panel on the right, paste the contents of `.env.example` and fill in `DISCORD_TOKEN`, `DISCORD_CLIENT_ID` and (optionally) `DISCORD_GUILD_ID`. Dockge writes this to the stack's `.env` file, which `env_file: .env` passes into the container.
+3. Click **Deploy**. Open the stack's **Terminal** (or the logs) — the invite link is printed on startup.
+4. Register the slash commands once, from the stack's terminal in Dockge:
+
+   ```sh
+   docker compose run --rm redux-music-bot node src/deploy-commands.js
+   ```
+
+5. To upgrade later, click **Update** (pull) and then **Restart**. Re-run step 4 if slash commands changed.
+
+Use the `:rewrite-v2` tag instead of `:latest` if you want to run this branch before it is merged to `main`.
+
 ## Configuration
 
 Every setting is an environment variable; see `.env.example` for the full list with defaults. The ones you are most likely to touch:

@@ -1,0 +1,22 @@
+services:
+  redux-music-bot:
+    # Prebuilt multi-arch image published by .github/workflows/docker.yml.
+    # `docker compose pull` fetches it; `build: .` is kept so `docker compose build` still works
+    # from a checkout if you would rather build locally.
+    image: ghcr.io/zhongdev/redux-music-bot:latest
+    build: .
+    container_name: redux-music-bot
+    restart: unless-stopped
+    # Run under tini so ffmpeg child processes are reaped and SIGTERM reaches Node cleanly.
+    init: true
+    # All configuration comes from .env (see .env.example). Values here override the file.
+    env_file: .env
+    environment:
+      YOUTUBE_CACHE_DIR: /app/.cache/youtubei
+    volumes:
+      - youtubei-cache:/app/.cache
+    # Optional: cap memory. /seek buffers a track in RAM (up to ~100 MB), so keep some headroom.
+    # mem_limit: 512m
+
+volumes:
+  youtubei-cache:

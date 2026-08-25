@@ -1,0 +1,14 @@
+node_modules
+.cache
+.git
+.gitignore
+.gitattributes
+.env
+.env.*
+!.env.example
+tests
+README.md
+LICENSE
+Dockerfile
+compose.yaml
+.dockerignore
