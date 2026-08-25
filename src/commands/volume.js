@@ -24,8 +24,7 @@ export default {
         if (percent > max) throw new UserError(`The maximum volume is ${max}%.`);
 
         const session = requireActiveSession(interaction, ctx);
-        await interaction.deferReply();
-        const restarted = await session.setVolume(percent);
-        await respond(interaction, `🔊 Volume set to **${percent}%**${restarted ? '' : ' (applies to the next track)'}.`);
+        const applied = session.setVolume(percent);
+        await respond(interaction, `🔊 Volume set to **${percent}%**${applied ? '.' : ' (applies when playback starts).'}`);
     },
 };
