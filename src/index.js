@@ -1,4 +1,4 @@
-import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js';
+import { Client, Events, GatewayIntentBits, MessageFlags, OAuth2Scopes, PermissionFlagsBits } from 'discord.js';
 import { generateDependencyReport } from '@discordjs/voice';
 import { assertRequiredEnv, config } from './config.js';
 import { createLogger } from './logger.js';
@@ -68,6 +68,18 @@ async function handleInteraction(interaction) {
 
 client.once(Events.ClientReady, (ready) => {
     logger.info(`Logged in as ${ready.user.tag}, serving ${ready.guilds.cache.size} guild(s).`);
+    logger.info(`Invite me: ${ready.generateInvite({
+        scopes: [OAuth2Scopes.Bot, OAuth2Scopes.ApplicationsCommands],
+        permissions: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.EmbedLinks,
+            PermissionFlagsBits.Connect,
+            PermissionFlagsBits.Speak,
+            PermissionFlagsBits.UseVAD,
+            PermissionFlagsBits.RequestToSpeak,
+        ],
+    })}`);
     logger.info(`${commandMap.size} slash commands loaded. Run "npm run deploy:commands" after changing them.`);
 });
 

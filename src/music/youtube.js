@@ -29,17 +29,20 @@ const PLAYABILITY_MESSAGES = {
     ERROR: 'YouTube returned an error for this video.',
 };
 
-const FFMPEG_OUTPUT_ARGS = [
+// Output raw signed 16-bit little-endian PCM at Discord's native 48kHz stereo. We deliberately do NOT
+// let ffmpeg encode Opus: encoding a seeked segment can emit an empty stream (an ffmpeg/libopus quirk),
+// and emitting PCM lets @discordjs/voice apply real-time inline volume before it encodes to Opus itself.
+const FFMPEG_PCM_ARGS = [
     '-vn', '-sn', '-dn',
-    '-c:a', 'libopus',
-    '-b:a', '128k',
     '-ar', '48000',
     '-ac', '2',
-    '-frame_duration', '20',
-    '-application', 'audio',
-    '-f', 'ogg',
+    '-f', 's16le',
     'pipe:1',
 ];
+
+// When seeking, we buffer the whole audio track into memory first because ffmpeg cannot reliably seek
+// near the end of youtubei.js's chunked download stream. This caps how large a track we will buffer.
+const MAX_SEEK_BUFFER_BYTES = 100 * 1024 * 1024;
 
 function badgeToSeconds(text) {
     if (!text || !/^\d+(:\d{1,2})+$/.test(text)) return null;
@@ -348,11 +351,14 @@ export class YouTubeService {
      * pass `exclude` to skip clients that have already failed for this track — used by the session to
      * recover with a different client when a stream dies mid-playback.
      *
+     * The resource always has inline volume enabled, so the session can change volume in real time
+     * without rebuilding the stream. Volume itself is applied by the caller, not here.
+     *
      * @param {Track} track
-     * @param {{ seek?: number, volume?: number, exclude?: Iterable<string> }} [options] seek in seconds, volume in percent
+     * @param {{ seek?: number, exclude?: Iterable<string> }} [options] seek in seconds
      * @returns {Promise<{ resource: import('@discordjs/voice').AudioResource<Track>, destroy: () => void, client: string }>}
      */
-    async createStream(track, { seek = 0, volume = 100, exclude } = {}) {
+    async createStream(track, { seek = 0, exclude } = {}) {
         const excluded = exclude instanceof Set ? exclude : new Set(exclude ?? []);
         const clients = this.clients.filter((client) => !excluded.has(client));
         const failures = [];
@@ -385,7 +391,7 @@ export class YouTubeService {
                     continue;
                 }
                 this.#logger.debug(`[${track.id}] streaming live via ${client} (HLS).`);
-                return { ...this.#ffmpegStream({ input: hls, volume, track, client }), client };
+                return { ...this.#ffmpegStream({ input: hls, track, client }), client };
             }
 
             const format = YouTubeService.pickAudioFormat(info);
@@ -405,10 +411,9 @@ export class YouTubeService {
             }
 
             const readable = Readable.fromWeb(webStream);
-            // Once a stream is committed and playing, surface any later error loudly with its rich
-            // detail here at the source — Discord's AudioPlayerError discards youtubei.js's `error.info`
-            // (HTTP status, etc.) before it reaches the session. Before commit, the no-op just prevents
-            // an unhandled 'error' while we validate below (the detail is reported via `failures`).
+            // Once a stream is committed, surface any later error loudly with its rich detail here at the
+            // source — Discord's AudioPlayerError discards youtubei.js's `error.info` (HTTP status, etc.)
+            // before it reaches the session. Before commit, the no-op just prevents an unhandled 'error'.
             let committed = false;
             readable.on('error', (error) => {
                 if (committed) {
@@ -416,9 +421,34 @@ export class YouTubeService {
                 }
             });
 
-            // Read the first chunk to confirm the URL is actually served (this is where a 403 shows up).
-            // Doing it for every path means a rejected client is skipped here instead of only after we
-            // have already handed a doomed stream to the audio player.
+            if (seek > 0) {
+                // Seeking needs a clean, complete, seekable input. youtubei.js's chunked download stream
+                // makes ffmpeg's WebM seek fail intermittently near the end of a track, so buffer the whole
+                // audio into memory first (this also surfaces a 403 here, letting us fall through).
+                let buffer;
+                try {
+                    buffer = await this.#collect(readable);
+                } catch (error) {
+                    const detail = describeStreamError(error);
+                    failures.push(`${client}: ${detail}`);
+                    this.#logger.debug(`[${track.id}] ${client} buffering for seek failed: ${detail}`);
+                    continue;
+                }
+                committed = true;
+                this.#logger.debug(`[${track.id}] streaming via ${client} + ffmpeg from ${seek}s (buffered ${buffer.length} bytes).`);
+                return { ...this.#ffmpegStream({ input: Readable.from(buffer), seek, track, client }), client };
+            }
+
+            if (!format.isOpus) {
+                // Non-Opus source (e.g. AAC): transcode sequentially. No seek, so no need to buffer; a 403
+                // shows up as a stream error and the session recovers by retrying with another client.
+                committed = true;
+                this.#logger.debug(`[${track.id}] streaming via ${client} + ffmpeg (itag=${format.itag}, non-opus).`);
+                return { ...this.#ffmpegStream({ input: readable, track, client }), client };
+            }
+
+            // Direct Opus path: demuxProbe both confirms the URL is actually served (a 403 shows up here,
+            // so we fall through to the next client) and selects the correct Opus demuxer.
             let probe;
             try {
                 probe = await this.#timed(demuxProbe(readable), 'open the stream');
@@ -429,18 +459,9 @@ export class YouTubeService {
                 this.#logger.debug(`[${track.id}] ${client} stream check failed: ${detail}`);
                 continue;
             }
-
-            const isOpus = probe.type === StreamType.OggOpus || probe.type === StreamType.WebmOpus;
-            const needsFfmpeg = seek > 0 || volume !== 100 || !isOpus;
             committed = true;
-
-            if (needsFfmpeg) {
-                this.#logger.debug(`[${track.id}] streaming via ${client} + ffmpeg (itag=${format.itag}, type=${probe.type}, seek=${seek}s, volume=${volume}%).`);
-                return { ...this.#ffmpegStream({ input: probe.stream, seek, volume, track, client }), client };
-            }
-
             this.#logger.debug(`[${track.id}] streaming via ${client} directly (itag=${format.itag}, type=${probe.type}).`);
-            const resource = createAudioResource(probe.stream, { inputType: probe.type, metadata: track });
+            const resource = createAudioResource(probe.stream, { inputType: probe.type, inlineVolume: true, metadata: track });
             return { resource, destroy: () => readable.destroy(), client };
         }
 
@@ -454,18 +475,54 @@ export class YouTubeService {
     }
 
     /**
-     * Transcodes an input (Node readable or URL) to Ogg/Opus with ffmpeg.
-     * @param {{ input: Readable | string, seek?: number, volume?: number, track: Track, client?: string }} options
+     * Reads a readable fully into a single Buffer, aborting if it exceeds {@link MAX_SEEK_BUFFER_BYTES}
+     * or does not finish within the request timeout.
+     * @param {Readable} readable
+     * @returns {Promise<Buffer>}
      */
-    #ffmpegStream({ input, seek = 0, volume = 100, track, client = 'ffmpeg' }) {
+    #collect(readable) {
+        const timeoutMs = this.#config.youtube.requestTimeoutMs;
+        return new Promise((resolve, reject) => {
+            const chunks = [];
+            let total = 0;
+            const timer = setTimeout(() => {
+                readable.destroy();
+                reject(new StreamError('timed out downloading audio for seeking'));
+            }, timeoutMs);
+            readable.on('data', (chunk) => {
+                total += chunk.length;
+                if (total > MAX_SEEK_BUFFER_BYTES) {
+                    clearTimeout(timer);
+                    readable.destroy();
+                    reject(new StreamError(`track is too large to seek (> ${Math.round(MAX_SEEK_BUFFER_BYTES / 1024 / 1024)}MB)`));
+                    return;
+                }
+                chunks.push(chunk);
+            });
+            readable.once('end', () => {
+                clearTimeout(timer);
+                resolve(Buffer.concat(chunks, total));
+            });
+            readable.once('error', (error) => {
+                clearTimeout(timer);
+                reject(error);
+            });
+        });
+    }
+
+    /**
+     * Transcodes an input (Node readable or URL) to raw PCM with ffmpeg. Seeking is done here (input
+     * `-ss`), which resets output timestamps to 0 so playback position tracks cleanly from the seek point.
+     * @param {{ input: Readable | string, seek?: number, track: Track, client?: string }} options
+     */
+    #ffmpegStream({ input, seek = 0, track, client = 'ffmpeg' }) {
         if (!ffmpegPath) throw new StreamError('ffmpeg binary not found (ffmpeg-static failed to install).');
         const isUrl = typeof input === 'string';
         const args = ['-hide_banner', '-loglevel', 'error', '-nostdin'];
         if (isUrl) args.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5');
         if (seek > 0) args.push('-ss', String(seek));
         args.push('-i', isUrl ? input : 'pipe:0');
-        if (volume !== 100) args.push('-af', `volume=${(volume / 100).toFixed(3)}`);
-        args.push(...FFMPEG_OUTPUT_ARGS);
+        args.push(...FFMPEG_PCM_ARGS);
 
         const child = spawn(ffmpegPath, args, { stdio: [isUrl ? 'ignore' : 'pipe', 'pipe', 'pipe'], windowsHide: true });
         let stderr = '';
@@ -495,7 +552,7 @@ export class YouTubeService {
             input.pipe(child.stdin);
         }
 
-        const resource = createAudioResource(child.stdout, { inputType: StreamType.OggOpus, metadata: track });
+        const resource = createAudioResource(child.stdout, { inputType: StreamType.Raw, inlineVolume: true, metadata: track });
         const destroy = () => {
             finished = true;
             if (!isUrl) input.destroy();

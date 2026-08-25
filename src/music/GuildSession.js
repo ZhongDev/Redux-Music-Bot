@@ -297,18 +297,17 @@ export class GuildSession extends EventEmitter {
     }
 
     /**
-     * Sets the volume (percent). If something is playing it is restarted in place at the new level.
-     * @returns {Promise<boolean>} whether playback had to be restarted
+     * Sets the volume (percent), applied to the live stream in real time with no interruption.
+     * @returns {boolean} whether it was applied to a currently playing stream
      */
     setVolume(percent) {
         this.#volume = Math.round(percent);
-        return this.#transition(async () => {
-            const track = this.#queue.current;
-            if (!track || !this.isActive) return false;
-            const position = track.isLive ? 0 : Math.floor(this.position);
-            await this.#startTrack(track, { seek: position, silent: true });
+        const volume = this.#stream?.resource?.volume;
+        if (volume) {
+            volume.setVolume(this.#volume / 100);
             return true;
-        });
+        }
+        return false;
     }
 
     pause() {
@@ -351,7 +350,7 @@ export class GuildSession extends EventEmitter {
 
         let stream;
         try {
-            stream = await this.#youtube.createStream(track, { seek, volume: this.#volume, exclude });
+            stream = await this.#youtube.createStream(track, { seek, exclude });
         } catch (error) {
             this.#logger.warn(`Could not start "${track.title}" (${track.id}): ${error.message}`);
             this.emit('trackError', track, error);
@@ -385,6 +384,7 @@ export class GuildSession extends EventEmitter {
             this.#activeClient = stream.client ?? null;
             this.#activeExclude = exclude;
             this.#streamErrored = false;
+            stream.resource.volume?.setVolume(this.#volume / 100);
             this.#player.play(stream.resource);
         } finally {
             this.#suppressIdle = false;

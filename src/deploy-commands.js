@@ -1,6 +1,6 @@
 import { REST, Routes } from 'discord.js';
 import { assertRequiredEnv, config } from './config.js';
-import { commands } from './commands/index.js';
+import { buildCommandData } from './commands/index.js';
 
 /**
  * Registers the slash commands with Discord.
@@ -20,7 +20,7 @@ const useGuild = Boolean(guildId) && !forceGlobal;
 const route = useGuild
     ? Routes.applicationGuildCommands(clientId, guildId)
     : Routes.applicationCommands(clientId);
-const body = clear ? [] : commands.map((command) => command.data.toJSON());
+const body = clear ? [] : buildCommandData();
 
 const rest = new REST().setToken(token);
 

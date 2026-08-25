@@ -29,11 +29,26 @@ License: GNU GPL v3 (see `LICENSE`).
 | `/shuffle` | Shuffle the upcoming tracks. |
 | `/clear [user] [duplicates]` | Clear the queue, or only one user's requests, or only duplicates. |
 | `/loop [off\|track\|queue]` | Set (or show) the loop mode. |
-| `/volume [percent]` | Set (or show) the volume. |
+| `/volume [percent]` | Set (or show) the volume. Applied to the live audio instantly — no skip or restart. |
+| `/aliases` | List all command shorthand aliases. |
+
+### Aliases
+
+Common commands have short aliases that behave exactly like the full command — run `/aliases` in Discord to see them:
+
+| Alias | Command | Alias | Command |
+| --- | --- | --- | --- |
+| `/p` | `/play` | `/sh` | `/shuffle` |
+| `/s` | `/skip` | `/prev` | `/previous` |
+| `/q` | `/queue` | `/rm` | `/remove` |
+| `/np` | `/nowplaying` | `/dc` | `/leave` |
+| `/vol` | `/volume` | `/l` | `/loop` |
 
 Other behaviour:
 
 - Only people in the bot's voice channel can control playback.
+- Volume changes are applied to the live stream in real time — no crackle, skip or restart.
+- `/seek` buffers the track in memory so it can seek accurately anywhere, including near the very end.
 - A "Now playing" message is posted when each track starts (`ANNOUNCE_NOW_PLAYING`).
 - The bot leaves on its own after the queue has been empty for a while (`IDLE_TIMEOUT_SECONDS`) or when everyone else leaves the channel (`EMPTY_CHANNEL_TIMEOUT_SECONDS`).
 - Live streams, YouTube Shorts links, `youtu.be` links and `watch?v=…&list=…` links (which load the playlist starting from that video) are all supported. Auto-generated "mix" playlists are not, because YouTube generates them per viewer.
